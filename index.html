@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dinosaur Game</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f7f7f7;
+            margin: 0;
+            font-family: 'Press Start 2P', cursive; /* Use the game font */
+            overflow: hidden; /* Prevent scrollbars */
+            flex-direction: column; /* Stack elements vertically */
+        }
+
+        #game-container {
+            border: 3px solid #333;
+            position: relative; /* Needed for absolute positioning of messages */
+            background-color: #fff;
+            overflow: hidden; /* Hide parts of obstacles outside the canvas */
+            border-radius: 8px; /* Rounded corners for the container */
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2); /* Add a subtle shadow */
+        }
+
+        canvas {
+            display: block; /* Remove extra space below canvas */
+            background-color: #f7f7f7; /* Light background for the game area */
+        }
+
+        #score {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 16px;
+            color: #555;
+        }
+
+        #message-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5); /* Semi-transparent overlay */
+            color: white;
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            font-size: 20px;
+            padding: 20px;
+            box-sizing: border-box;
+            border-radius: 8px; /* Match container rounding */
+        }
+
+        #message-overlay p {
+            margin: 10px 0;
+        }
+
+        .instructions {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="gameCanvas" width="600" height="200"></canvas>
+        <div id="score">Score: 0</div>
+        <div id="message-overlay">
+            <p id="game-over-message">Game Over!</p>
+            <p id="final-score"></p>
+            <p>Press Space to Restart</p>
+        </div>
+    </div>
+    <div class="instructions">Press SPACE to jump</div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreDisplay = document.getElementById('score');
+        const messageOverlay = document.getElementById('message-overlay');
+        const gameOverMessage = document.getElementById('game-over-message');
+        const finalScoreDisplay = document.getElementById('final-score');
+
+        // Game constants and variables
+        const dinoWidth = 40; // Approximate width of the emoji character
+        const dinoHeight = 40;
+        const dinoX = 50; // Fixed X position for the dinosaur's left edge (when not flipped)
+        const groundY = canvas.height - dinoHeight - 10; // Position dinosaur slightly above the bottom
+        const gravity = 0.6;
+        const jumpStrength = -12; // Negative value for upward movement
+        const obstacleWidth = 20; // Approximate width of the emoji character
+        const obstacleHeight = 40;
+        const minObstacleGap = 250; // Minimum gap between obstacles
+        const maxObstacleGap = 500; // Maximum gap between obstacles
+        const initialSpeed = 5;
+        const speedIncrease = 0.001; // How much speed increases over time
+
+        let dinoY = groundY;
+        let dinoVelocityY = 0;
+        let isJumping = false;
+        let obstacles = [];
+        let score = 0;
+        let gameSpeed = initialSpeed;
+        let frameCount = 0; // To control obstacle spawning
+        let nextObstacleFrame = 0; // When the next obstacle should appear
+        let gameOver = false;
+        let gameStarted = false; // Track if the game has started
+
+        // --- Drawing Functions ---
+
+        function drawGround() {
+            ctx.beginPath();
+            ctx.moveTo(0, groundY + dinoHeight);
+            ctx.lineTo(canvas.width, groundY + dinoHeight);
+            ctx.strokeStyle = '#333'; // Darker line for the ground
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        function drawDino() {
+            ctx.save(); // Save the current canvas state
+            // Flip the canvas horizontally
+            ctx.scale(-1, 1);
+            // Set the font for the emoji
+            ctx.font = `${dinoHeight}px Arial`;
+             // Draw the emoji. Adjust the X position to account for the flip.
+             // We want the dino's *original* left edge (dinoX) to become its *flipped* right edge.
+             // So we draw at -(dinoX + dinoWidth).
+            ctx.fillText('🦖', -(dinoX + dinoWidth), dinoY + dinoHeight);
+            ctx.restore(); // Restore the canvas state to normal (unflipped)
+        }
+
+        function drawObstacle(obstacle) {
+             // Emoji cactus 🌵 (Ensure font supports it)
+            ctx.font = `${obstacle.height}px Arial`; // Size the emoji
+            // Draw the cactus emoji. The Y position is adjusted to place its base on the ground line.
+            ctx.fillText('🌵', obstacle.x, canvas.height - 10);
+        }
+
+        function drawScore() {
+            scoreDisplay.textContent = `Score: ${Math.floor(score)}`;
+        }
+
+        // --- Game Logic Functions ---
+
+        function updateDino() {
+            if (isJumping) {
+                dinoVelocityY += gravity;
+                dinoY += dinoVelocityY;
+
+                // Prevent falling through the ground
+                if (dinoY > groundY) {
+                    dinoY = groundY;
+                    dinoVelocityY = 0;
+                    isJumping = false;
+                }
+            }
+        }
+
+        function spawnObstacle() {
+            // Randomize obstacle type (single cactus, double cactus, etc.) - Future enhancement
+            const newObstacle = {
+                x: canvas.width, // Start off-screen to the right
+                width: obstacleWidth, // Use defined width
+                height: obstacleHeight // Use defined height
+            };
+            obstacles.push(newObstacle);
+
+            // Determine when the next obstacle should spawn based on a random gap
+            const gap = minObstacleGap + Math.random() * (maxObstacleGap - minObstacleGap);
+            // Calculate the number of frames until the next spawn based on current speed
+            nextObstacleFrame = frameCount + Math.floor(gap / gameSpeed);
+        }
+
+        function updateObstacles() {
+            // Spawn new obstacles if it's time
+            if (frameCount >= nextObstacleFrame) {
+                spawnObstacle();
+            }
+
+            // Move each obstacle to the left
+            for (let i = obstacles.length - 1; i >= 0; i--) {
+                obstacles[i].x -= gameSpeed;
+
+                // Remove obstacles that have moved completely off-screen to the left
+                if (obstacles[i].x + obstacles[i].width < 0) {
+                    obstacles.splice(i, 1);
+                }
+            }
+        }
+
+        function checkCollision() {
+            // Collision detection needs to use the fixed dinoX position
+            for (const obstacle of obstacles) {
+                // Simple AABB (Axis-Aligned Bounding Box) collision detection
+                // Check if the dinosaur's bounding box overlaps with the obstacle's bounding box
+                if (
+                    dinoX < obstacle.x + obstacle.width && // Dino's left edge < Obstacle's right edge
+                    dinoX + dinoWidth > obstacle.x &&      // Dino's right edge > Obstacle's left edge
+                    dinoY < canvas.height - 10 /* Obstacle's top edge */ &&
+                    dinoY + dinoHeight > canvas.height - obstacle.height - 10 // Dino's bottom edge > Obstacle's top edge
+                ) {
+                    return true; // Collision detected
+                }
+            }
+            return false; // No collision
+        }
+
+        function showGameOver() {
+            gameOver = true; // Set the game over flag
+            finalScoreDisplay.textContent = `Final Score: ${Math.floor(score)}`; // Display final score
+            messageOverlay.style.display = 'flex'; // Show the game over message overlay
+        }
+
+        function resetGame() {
+            // Reset all game variables to their initial states
+            dinoY = groundY;
+            dinoVelocityY = 0;
+            isJumping = false;
+            obstacles = [];
+            score = 0;
+            gameSpeed = initialSpeed;
+            frameCount = 0;
+            nextObstacleFrame = 100; // Initial delay before first obstacle
+            gameOver = false;
+            gameStarted = true; // Mark game as started (or restarted)
+            messageOverlay.style.display = 'none'; // Hide the game over overlay
+            gameLoop(); // Start the game loop again
+        }
+
+        // --- Game Loop ---
+
+        function gameLoop() {
+            if (gameOver) {
+                return; // Stop the loop if game is over
+            }
+
+            // 1. Clear Canvas: Erase everything from the previous frame
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 2. Update Game State: Move dinosaur, move obstacles, increase speed/score
+            updateDino();
+            updateObstacles();
+            gameSpeed += speedIncrease; // Gradually increase speed
+            score += gameSpeed / 20; // Increase score (adjusted divisor for slower score increase)
+            frameCount++;
+
+            // 3. Draw Everything: Redraw all game elements in their new positions
+            drawGround();
+            drawDino(); // Draws the flipped dino
+            obstacles.forEach(drawObstacle);
+            drawScore();
+
+            // 4. Check for Collisions: See if the dinosaur hit an obstacle
+            if (checkCollision()) {
+                showGameOver(); // If collision, show game over screen
+                return; // Exit loop immediately on collision
+            }
+
+            // 5. Request Next Frame: Schedule the next iteration of the game loop
+            requestAnimationFrame(gameLoop);
+        }
+
+        // --- Event Listeners ---
+
+        document.addEventListener('keydown', (event) => {
+            // Listen for the Spacebar key press
+            if (event.code === 'Space') {
+                 event.preventDefault(); // Prevent spacebar from scrolling the page
+
+                if (gameOver) {
+                    // If the game is over, pressing Space restarts it
+                    resetGame();
+                } else if (!isJumping && dinoY === groundY) {
+                     // If the game is running and the dino is on the ground, make it jump
+                    if (!gameStarted) {
+                        // If this is the very first jump, start the game loop
+                        gameStarted = true;
+                        resetGame(); // Initialize and start the loop properly
+                    }
+                    isJumping = true;
+                    dinoVelocityY = jumpStrength; // Apply upward velocity
+                }
+            }
+        });
+
+        // --- Initial Setup ---
+        // Draw the initial state before the game loop starts
+        drawGround();
+        drawDino();
+        drawScore();
+        // Set initial obstacle spawn time
+        nextObstacleFrame = 150; // Give a bit more time before the first obstacle
+
+        console.log("Dinosaur game loaded. Press Space to jump!");
+
+    </script>
+</body>
+</html>
